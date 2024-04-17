@@ -1,0 +1,213 @@
+- name: timezone, swap, utilities for all hosts
+  become:        yes
+  become_user:   root
+  tags:
+    - prepare_basic
+  block:
+
+  - name: Set timezone to Europe/Moscow.
+    community.general.timezone:
+      name: Europe/Moscow
+
+  - name: Disable swap.
+    command: swapoff -a
+    changed_when: true
+    when: ansible_swaptotal_mb > 0
+
+  - name: Remove swap from fstab.
+    lineinfile:
+      path: '/etc/fstab'
+      regexp: '\sswap\s'
+      state: 'absent'
+
+  - name: Install deps.
+    apt:
+      name: "{{item}}"
+      state: present
+      update_cache: yes
+    loop:
+      - ethtool
+      - ipvsadm
+      - jq
+      - sshpass
+      - apt-transport-https
+      - ca-certificates
+      - openssl
+      - curl
+      - gnupg-agent
+      - gnupg2
+      - vim
+      - htop
+      - net-tools
+      - rsync
+      - unzip
+      - aptitude
+      - tree
+      - software-properties-common
+      - python3-pip
+      - golang-cfssl
+      - cifs-utils
+      - sysstat
+      - iotop
+      - traceroute
+      - tcpdump
+      - bmon
+      - tcptrack
+      - iftop
+      - iptraf
+      - xfsdump
+      - dnsutils
+      - fio
+
+  - name: Install pip3 docker ( for ansible ).
+    ansible.builtin.pip:
+      name: "{{item}}"
+    with_items:
+      - docker==4.4.4
+      - cryptography>=1.6
+
+- name: nomad consul prerequests
+  become:        yes
+  become_user:   root
+  become_method: sudo
+  tags:
+    - prepare_hashicorp
+  block:
+
+  - name: Install dnsmasq
+    apt:
+      name: dnsmasq
+      state: present
+      update_cache: yes
+
+  - name: DNSmasq setup to support dns inside docker containers
+    copy:
+      dest: "/etc/dnsmasq.d/10-consul"
+      content: |
+        port=53
+        bind-dynamic
+        interface=*
+        server=/{{consul_domain_name}}/127.0.0.1#8600
+        {% if consul_alt_domain_name|length %}
+        server=/{{consul_alt_domain_name}}/127.0.0.1#8600
+        {% endif %}
+
+  - name: Restart DNSmasq service.
+    service:
+      name: dnsmasq
+      state: restarted
+
+  - name: setup dhcclient
+    replace:
+      path: /etc/dhcp/dhclient.conf
+      regexp: '#prepend domain-name-servers 127.0.0.1;'
+      replace: 'prepend domain-name-servers 127.0.0.1;'
+
+  - name: create subdir for resolved configs
+    file:
+      path: /etc/systemd/resolved.conf.d
+      recurse: true
+      state: directory
+
+  - name: setup systemd-resolved
+    copy:
+      dest: /etc/systemd/resolved.conf.d/consul.conf
+      content: |
+        [Resolve]
+        DNS=127.0.0.1
+        DNSSEC=false
+        {% if consul_alt_domain_name|length %}
+        Domains=~{{consul_domain_name}} ~{{consul_alt_domain_name}}
+        {% else %}
+        Domains=~{{consul_domain_name}}
+        {% endif %}
+
+  - name: Restart systemd-resolved service.
+    service:
+      name: systemd-resolved
+      state: restarted
+
+
+- name: docker, docker-compose + bash_completion
+  become:        yes
+  become_user:   root
+  become_method: sudo
+  tags:
+    - prepare_docker
+  block:
+
+  - name: Install pip3 docker ( for ansible ).
+    ansible.builtin.pip:
+      name: docker==4.4.4
+
+  - name: Add GPG key.
+    apt_key:
+      url: https://download.docker.com/linux/ubuntu/gpg
+      state: present
+
+  - name: Add docker repo.
+    apt_repository:
+      repo: "deb https://download.docker.com/linux/ubuntu {{ansible_distribution_release}} stable"
+      state: present
+
+  - name: Install docker.
+    apt:
+      name: "{{item}}"
+      state: latest
+      update_cache: yes
+    loop:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+
+  - name: Check docker is active.
+    service:
+      name: docker
+      state: started
+      enabled: yes
+
+  - name: Ensure group "docker" exists.
+    ansible.builtin.group:
+      name: docker
+      state: present
+
+  - name: Adding ubuntu to docker group.
+    user:
+      name: "{{ansible_user}}"
+      groups: docker
+      append: yes
+
+  - name: Install docker-compose.
+    get_url:
+      url: https://github.com/docker/compose/releases/download/1.29.2/docker-compose-Linux-x86_64
+      dest: /usr/local/bin/docker-compose
+      mode: 'u+x,g+x'
+
+  - name: Install docker-compose completion.
+    get_url:
+      url: https://raw.githubusercontent.com/docker/compose/1.29.2/contrib/completion/bash/docker-compose
+      dest: /etc/bash_completion.d/docker-compose
+
+  - name: Change file ownership, group and permissions
+    ansible.builtin.file:
+      path: /usr/local/bin/docker-compose
+      owner: "{{ansible_user}}"
+      group: "{{ansible_user}}"
+
+# setup for mongodb
+- name: sysctl for mongo
+  become:        yes
+  become_user:   root
+  become_method: sudo
+  tags:
+    - prepare_mongo
+  block:
+
+  - name: Set sysctl options.
+    ansible.posix.sysctl:
+      name: vm.max_map_count
+      value: '262144'
+      sysctl_set: true
+      state: present
+    when: inventory_hostname == "storage1" or inventory_hostname == "storage2"
+
