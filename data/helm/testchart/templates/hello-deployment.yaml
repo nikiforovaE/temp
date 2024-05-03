@@ -1,0 +1,50 @@
+---
+apiVersion: v1
+kind:       Service
+metadata:
+  namespace: {{ .Values.ms.ns }}
+  name:      hello-gcr-svc
+spec:
+  selector:
+    app: hello-gcr
+  type: ClusterIP
+  ports:
+  - protocol:   TCP
+    port:       3000
+    targetPort: hello-gcr-p
+---
+apiVersion: apps/v1
+kind:       Deployment
+metadata:
+  namespace: {{ .Values.ms.ns }}
+  name:      hello-gcr
+  labels:
+    app: hello-gcr-deploy
+spec:
+  selector: # селектор для deployment, связываем с pod
+    matchLabels:
+      app: hello-gcr
+  replicas: {{ .Values.ms.rs }}
+  template: # шаблон пода
+    metadata: # метаданные для pod
+      labels:
+        app: hello-gcr
+    spec:
+      containers:
+      - name: hello-gcr
+        image: gcr.io/google-samples/hello-app:1.0
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: 100Mi
+            cpu:    200m
+          limits:
+            memory: 100Mi
+            cpu:    200m
+        env:
+        - name: TZ
+          value: "Europe/Moscow"
+        ports:
+        - containerPort: 8080
+          name: hello-gcr-p
+
