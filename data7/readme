@@ -1,0 +1,40 @@
+# run order
+k apply -f ns.yaml
+k apply -f ds_node_exporter.yaml
+k apply -f deploy_prometheus.yaml
+k apply -f deploy_grafana.yaml
+
+# delete order
+k delete -f deploy_grafana.yaml
+k delete -f ds_node_exporter.yaml
+k delete -f deploy_prometheus.yaml
+k delete -f ns.yaml
+
+
+# on master1 node
+# create
+su -
+
+mkdir -p /k8s_data/{grafana,prometheus}
+chown -R 65534:65534 /k8s_data/prometheus
+chown -R 472:0 /k8s_data/grafana
+ls -l /k8s_data
+
+# remove. if u want to delete all persist data
+rm -Rf /k8s_data
+
+### simulate load
+
+# disk
+fallocate -l 512MB test_file
+
+# cpu
+stress -c `nproc`
+
+# ram
+mkdir tmpfsdir
+mount -t tmpfs tmpfs tmpfsdir/
+fallocate -l 512MB test_file
+
+# net
+while :; do curl -s -k https://ya.ru/df 1>2 > /dev/null; done
